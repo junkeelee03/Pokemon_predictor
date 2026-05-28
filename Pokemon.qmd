@@ -14,7 +14,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 ```
 
 ```{python}
-pokemon = pd.read_csv("../data/pokemon.csv") 
+pokemon = pd.read_csv("pokemon.csv") 
 pokemon.head()
 ```
 
