@@ -1,0 +1,206 @@
+title: "Untitled"
+format: html: 
+
+
+```{python}
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import make_pipeline
+from sklearn.compose import make_column_selector, ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
+```
+
+```{python}
+pokemon = pd.read_csv("../data/pokemon.csv") 
+pokemon.head()
+```
+
+```{python}
+pokemon.drop(columns = ["#", "Name", "Type 2", "Total", "Generation"], inplace = True)
+```
+
+```{python}
+pokemon.drop_duplicates(inplace = True)
+```
+
+```{python}
+pokemon_train, pokemon_test = train_test_split(pokemon, test_size = 0.30, stratify = pokemon["Legendary"], random_state = 1234)
+```
+
+```{python}
+X_train = pokemon_train.drop(columns = ["Legendary"])
+y_train = pokemon_train["Legendary"].copy()
+``` 
+
+```{python}
+class TextCleaner(BaseEstimator, TransformerMixin):
+    '''
+    Convierte texto a minúsculas y elimina
+    espacios al inicio/final. Los valores nulos
+    (NaN/None) se preservan sin modificación.
+    '''
+
+    ## Método fit() no realiza nada
+    def fit(self, X, y = None):
+        return self
+
+    ## Método transform()
+    def transform(self, X):
+        ## Convertir a data frame
+        X = pd.DataFrame(X).copy()
+
+        ## Quitar espacios y convertir a minúscula
+        ## cada una de los valores de las columnas
+        ## afectadas sólo si existe información, en
+        ## caso contrario se deja el valor intacto
+        ## Al finalizar, se devuelve un arreglo
+        X_clean = X.apply(lambda col: col.map(
+                            lambda val: val.strip().lower() if isinstance(val, str) else val)).values
+
+        return X_clean
+
+    ## Método get_feature_names_out()
+    ## Obtener los nombres de las variables
+    def get_feature_names_out(self, input_features = None):
+        if input_features is not None:
+            return np.array(input_features)
+        if hasattr(self, "feature_names_in_"):
+            return self.feature_names_in_
+        return np.array([f"x{i}" for i in range(self.n_features_in_)])
+```
+
+```{python}
+clean_text_pipeline = make_pipeline(TextCleaner(), SimpleImputer(strategy = "most_frequent"), OneHotEncoder(handle_unknown = "ignore", sparse_output = False)) 
+```
+
+```{python}
+num_pipeline = make_pipeline(SimpleImputer(strategy = "median"), StandardScaler())
+```
+
+```{python}
+preprocessing = ColumnTransformer([("cat", clean_text_pipeline, ["Type 1"]), ("num", num_pipeline, make_column_selector(dtype_include = np.number))]) 
+```
+
+```{python}
+X_prepared = preprocessing.fit_transform(X_train)
+```
+
+```{python}
+k = np.sqrt(len(X_train)) 
+```
+
+```{python}
+from sklearn.neighbors import KNeighborsClassifier 
+
+knn_clf = make_pipeline(preprocessing, KNeighborsClassifier(n_neighbors = int(k))) 
+```
+
+```{python}
+knn_clf.fit(X_train, y_train) 
+```
+
+```{python}
+accuracy = knn_clf.score(X_train, y_train)
+```
+
+```{python}
+from sklearn.model_selection import StratifiedKFold
+
+skf = StratifiedKFold(n_splits = 10)
+```
+
+```{python}
+score = []
+```
+
+```{python}
+for train, validation in skf.split(X_train, y_train):
+    ## Ajustamos el modelo sobre
+    ## el subset de entrenamiento
+    knn_clf.fit(X_train.iloc[train], y_train.iloc[train])
+
+    ## Obtenemos la accuracy
+    ## sobre el validation set
+    score.append(knn_clf.score(X_train.iloc[validation], y_train.iloc[validation]))
+```
+
+```{python}
+np.array(score).mean()
+```
+
+```{python}
+from sklearn.model_selection import cross_val_score
+
+cv_10 = cross_val_score(estimator = knn_clf,
+                        cv = 10,
+                        X = X_train,
+                        y = y_train,
+                        scoring = "accuracy")
+```
+
+```{python}
+pd.Series(cv_10).describe()
+```
+
+```{python}
+knn_clf = make_pipeline(preprocessing, KNeighborsClassifier())
+```
+
+```{python}
+knn_clf.get_params()
+```
+
+```{python}
+parameter_grid = {"kneighborsclassifier__n_neighbors": range(1, 50)}
+```
+
+```{python}
+from sklearn.model_selection import GridSearchCV
+
+grid_search = GridSearchCV(estimator = knn_clf,
+                           param_grid = parameter_grid,
+                           cv = 10,
+                           n_jobs = -1) 
+```
+
+```{python}
+grid_search.fit(X_train, y_train) 
+```
+
+```{python}
+cv_res = pd.DataFrame(grid_search.cv_results_)
+```
+
+```{python}
+cv_res["sem_test_score"] = cv_res["std_test_score"]/np.sqrt(10)
+```
+
+```{python}
+cv_res = cv_res[["param_kneighborsclassifier__n_neighbors",
+                 "mean_test_score",
+                 "sem_test_score"]]
+```
+
+```{python}
+cv_res = cv_res.rename(columns = {"param_kneighborsclassifier__n_neighbors": "n_neighbors"})
+```
+
+```{python}
+cv_res.nlargest(1, "mean_test_score")
+```
+
+```{python}
+X_test = pokemon_test.drop(columns = ["Legendary"])
+y_test = pokemon_test["Legendary"].copy()
+``` 
+
+```{python}
+best_knn_clf = grid_search.best_estimator_
+```
+
+```{python}
+best_knn_clf.score(X_test, y_test)
+```
